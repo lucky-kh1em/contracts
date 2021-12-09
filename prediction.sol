@@ -28,7 +28,7 @@ contract PredictionPool is ReentrancyGuard, Ownable {
 
   uint256 public dptPerBlock;
 
-  uint256[] public dptRewardRate = [50, 20, 15, 10, 5];
+  uint256[5] public dptRewardRate = [50, 20, 15, 10, 5];
 
   mapping(address => uint256) public userDptReward; // user address => dpt reward
 
@@ -107,6 +107,11 @@ contract PredictionPool is ReentrancyGuard, Ownable {
     uint256 newAllocPoint
   );
 
+  event SetDepositDuration(uint256 oldValue, uint256 newValue);
+  event SetLockDuration(uint256 oldValue, uint256 newValue);
+  event SetWithdrawFee(uint256 oldValue, uint256 newValue);
+  event SetDevAddress(address oldValue, address newValue);
+
   constructor(
     address _chef,
     address _dpt,
@@ -114,6 +119,11 @@ contract PredictionPool is ReentrancyGuard, Ownable {
     address _aggregator,
     address _upkeeper
   ) {
+    require(_chef != address(0), "chef is a zero address");
+    require(_dpt != address(0), "dpt is a zero address");
+    require(_cake != address(0), "cake is a zero address");
+    require(_aggregator != address(0), "aggregator is a zero address");
+    require(_upkeeper != address(0), "upkeeper is a zero address");
     masterchef = IMasterchef(_chef);
     dpt = IERC20(_dpt);
     cake = IERC20(_cake);
@@ -143,19 +153,27 @@ contract PredictionPool is ReentrancyGuard, Ownable {
   }
 
   function setDepositDuration(uint256 _depositDuration) external onlyOwner {
+    uint256 oldValue = depositDuration;
     depositDuration = _depositDuration;
+    emit SetDepositDuration(oldValue, _depositDuration);
   }
 
   function setLockDuration(uint256 _lockDuration) external onlyOwner {
+    uint256 oldValue = lockDuration;
     lockDuration = _lockDuration;
+    emit SetLockDuration(oldValue, _lockDuration);
   }
 
   function setWithdrawFee(uint256 _withdrawFee) external onlyOwner {
+    uint256 oldValue = withdrawFee;
     withdrawFee = _withdrawFee;
+    emit SetWithdrawFee(oldValue, _withdrawFee);
   }
 
   function setDevAddress(address _dev) external onlyOwner {
+    address oldValue = devAddress;
     devAddress = _dev;
+    emit SetDevAddress(oldValue, _dev);
   }
 
   function add(
@@ -210,15 +228,31 @@ contract PredictionPool is ReentrancyGuard, Ownable {
     uint256 length = pools.length;
     for (uint256 i = 0; i < length; i++) {
       if (pools[i].canYieldCake == 1) {
+        uint256 currentAllowance = pools[i].lpToken.allowance(
+          address(this),
+          address(masterchef)
+        );
         pools[i].lpToken.safeIncreaseAllowance(
           address(masterchef),
-          type(uint256).max
+          type(uint256).max - currentAllowance
         );
       }
       pools[i].lastStakingRewardBlock = block.number;
     }
 
     emit StartFirstRound(status.initialPrice);
+  }
+
+  function increaseAllowancePancake(uint256 poolId) external onlyOwner {
+    uint256 currentAllowance = pools[poolId].lpToken.allowance(
+      address(this),
+      address(masterchef)
+    );
+
+    pools[poolId].lpToken.safeIncreaseAllowance(
+      address(masterchef),
+      type(uint256).max - currentAllowance
+    );
   }
 
   function updatePool(uint256 poolId) private {
@@ -602,6 +636,10 @@ contract PredictionPool is ReentrancyGuard, Ownable {
     }
 
     uint256 randomUsersLength = randomRewardUser.length;
+    require(
+      randomUsersLength <= dptRewardRate.length,
+      "Random rewarded users too long"
+    );
     for (uint256 i = 0; i < randomUsersLength; i++) {
       userDptReward[randomRewardUser[i]] +=
         (totalRewardRandomUsers * dptRewardRate[i]) /
